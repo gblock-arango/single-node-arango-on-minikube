@@ -1,0 +1,104 @@
+# This script installs:
+# - Docker
+# - kubectl
+# - helm
+# - minikube
+#
+# Run it on Ubuntu 22. See below for details on each step.
+#
+# kubectl:
+# - https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/
+# helm:
+# - https://helm.sh/docs/intro/install/
+# minikube:
+# - https://minikube.sigs.k8s.io/docs/start/
+# - https://minikube.sigs.k8s.io/docs/drivers/docker/
+
+set -e
+
+echo "Updating apt..."
+sudo apt-get update
+sudo apt-get install -y apt-transport-https ca-certificates curl gpg docker.io
+
+echo "Configuring Docker..."
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER"
+
+echo "Installing kubectl..."
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key \
+  | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /' \
+  | sudo tee /etc/apt/sources.list.d/kubernetes.list > /dev/null
+sudo apt-get update
+sudo apt-get install -y kubectl
+
+echo "Installing Helm..."
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+echo "Installing Minikube..."
+curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube_latest_amd64.deb
+sudo dpkg -i minikube_latest_amd64.deb
+rm -f minikube_latest_amd64.deb
+
+echo "Setting default Kubernetes version for Minikube..."
+minikube config set kubernetes-version v1.30.14
+
+echo
+echo "Installed versions:"
+kubectl version --client
+helm version
+minikube version
+
+echo
+echo "IMPORTANT:"
+echo "1. Log out and log back in so your user gets Docker group access."
+echo "2. Then start Minikube with:"
+echo "   minikube start --driver=docker (or minikube start --driver=docker --kubernetes-version=v1.30.14)"
+
+# # Ensure permissions, worst case add again
+# sudo usermod -aG docker $USER
+# newgrp docker
+
+# # Restart docker daemon
+# sudo systemctl daemon-reload
+
+# # Start minikube
+# minikube start --driver=docker
+#     😄  minikube v1.38.1 on Ubuntu 22.04
+#     ✨  Using the docker driver based on user configuration
+#     ❗  Starting v1.39.0, minikube will default to "containerd" container runtime. See #21973 for more info.
+#     📌  Using Docker driver with root privileges
+#     👍  Starting "minikube" primary control-plane node in "minikube" cluster
+#     🚜  Pulling base image v0.0.50 ...
+#     🔥  Creating docker container (CPUs=2, Memory=16000MB) ...
+#     🐳  Preparing Kubernetes v1.30.14 on Docker 29.2.1 ...
+#     🔗  Configuring bridge CNI (Container Networking Interface) ...
+#     🔎  Verifying Kubernetes components...
+#         ▪ Using image gcr.io/k8s-minikube/storage-provisioner:v5
+#     🌟  Enabled addons: storage-provisioner, default-storageclass
+#     🏄  Done! kubectl is now configured to use "minikube" cluster and "default" namespace by default
+
+# # After minikube starts, verify the cluster:
+# kubectl get nodes
+#     NAME       STATUS   ROLES           AGE   VERSION
+#     minikube   Ready    control-plane   20s   v1.30.14
+
+# kubectl get pods -A
+#     NAMESPACE     NAME                               READY   STATUS    RESTARTS   AGE
+#     kube-system   coredns-55cb58b774-q7472           0/1     Running   0          7s
+#     kube-system   etcd-minikube                      1/1     Running   0          20s
+#     kube-system   kube-apiserver-minikube            1/1     Running   0          20s
+#     kube-system   kube-controller-manager-minikube   1/1     Running   0          20s
+#     kube-system   kube-proxy-kkxk5                   1/1     Running   0          7s
+#     kube-system   kube-scheduler-minikube            1/1     Running   0          21s
+#     kube-system   storage-provisioner                1/1     Running   0          19s
+
+# # CPU and RAM utilization
+# docker stats --no-stream minikube
+#     CONTAINER ID   NAME       CPU %     MEM USAGE / LIMIT     MEM %     NET I O         BLOCK I/O        PIDS
+#     91458541bce6   minikube   19.24%    533.1MiB / 15.62GiB   3.33%     212kB / 299kB   4.1kB / 13.9MB   468
+
+# # Enable K8s usage by node
+# #minikube addons enable metrics-server
+# #Wait 30-60 seconds, then run: kubectl top node

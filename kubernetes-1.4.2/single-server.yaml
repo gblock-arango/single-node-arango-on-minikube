@@ -1,0 +1,33 @@
+apiVersion: "database.arangodb.com/v1"
+kind: "ArangoDeployment"
+metadata:
+  name: "single-server"
+spec:
+  mode: Single
+  image: arangodb/arangodb:latest
+
+  auth:
+    jwtSecretName: single-server-jwt
+
+  bootstrap:
+    passwordSecretNames:
+      root: arango-root-pwd
+
+  single:
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 20Gi
+
+    volumes:
+      - name: import-dir
+        hostPath:
+          path: /mnt/arango-import
+          type: Directory
+
+    volumeMounts:
+      - name: import-dir
+        mountPath: /imports
