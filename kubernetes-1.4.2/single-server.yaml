@@ -16,6 +16,7 @@ spec:
   single:
     volumeClaimTemplate:
       spec:
+        storageClassName: arango-minikube-data
         accessModes:
           - ReadWriteOnce
         resources:

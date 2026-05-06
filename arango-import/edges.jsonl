@@ -1,0 +1,7 @@
+{"_from":"nodes/p_alice","_to":"nodes/p_bob","kind":"knows","weight":1.0}
+{"_from":"nodes/p_bob","_to":"nodes/p_carol","kind":"knows","weight":1.0}
+{"_from":"nodes/p_alice","_to":"nodes/proj_bridge","kind":"owns","role":"lead"}
+{"_from":"nodes/p_bob","_to":"nodes/proj_bridge","kind":"contributes","role":"developer"}
+{"_from":"nodes/p_carol","_to":"nodes/org_acme","kind":"employed_by","since":2019}
+{"_from":"nodes/p_dan","_to":"nodes/org_acme","kind":"employed_by","since":2021}
+{"_from":"nodes/org_acme","_to":"nodes/proj_bridge","kind":"sponsors"}

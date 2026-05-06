@@ -1,170 +1,73 @@
-# ArangoDB test standup
+# Arango on Minikube (single node)
 
-Local single-node ArangoDB on Minikube, with a host folder mounted for imports.
-
-## Files
-
-- `install_kubectl+helm+minikube`: installs local prerequisites on Ubuntu 22
-- `kubernetes-1.4.2/arango-crd.yaml`: Arango CRDs
-- `kubernetes-1.4.2/arango-deployment.yaml`: Arango deployment operator install bundle
-- `kubernetes-1.4.2/arango-storage.yaml`: Arango storage operator install bundle
-- `kubernetes-1.4.2/single-server.yaml`: ArangoDB `ArangoDeployment`
-- `manage-arango.sh`: starts and manages the local cluster
+Local Arango suite of services using the [kube-arangodb](https://github.com/arangodb/kube-arangodb) operator. **`manage-arango.sh`** drives Minikube, mounts, deploy, and optional sample import.
 
 ## Quick start
 
-Install prerequisites first:
+Install the basic dependencies:
 
 ```bash
-./install_kubectl+helm+minikube
+./install_kubectl+helm+minikube  
 ```
 
-Then bring everything up:
+Stand up the Arango Cluster
 
 ```bash
 ./manage-arango.sh all-up
-```
-
-`all-up` now waits for:
-
-- the Minikube node to become ready
-- core Kubernetes services to recover after restart
-- Arango operator deployments to become available
-- the Arango pod to appear before waiting on pod readiness
-- the `ArangoDeployment` itself to report `Ready=True`
-
-It also prints timestamped progress messages during these waits, so you can see which stage is currently blocking startup.
-
-When setup completes, `all-up` also starts the UI port-forward in the background automatically.
-
-On first deploy, the script creates these Kubernetes secrets if they do not already exist:
-
-- `single-server-jwt`
-- `arango-root-pwd`
-
-If the root password is generated automatically, it is saved to:
-
-- `.state/arango-root-password.txt`
-
-Check status:
-
-```bash
 ./manage-arango.sh status
 ```
 
-Open the ArangoDB UI:
+First start after a Minikube restart can take **several minutes**: the **`single-server-sngl-…`** pod stays in **`Init:*`** while TLS prep runs and the image may be pulled. (You may also see a **`single-server-id-…`** pod; that is image discovery, not the database.) `all-up` waits only on **`role=single`** and prints pod status every 20s.
+
+Bring down the Arango Cluster
 
 ```bash
-./manage-arango.sh ui
-```
-
-Or start/stop the UI port-forward in the background manually:
-
-```bash
-./manage-arango.sh ui-bg
-./manage-arango.sh ui-stop
-```
-
-Then browse to:
-
-- `https://127.0.0.1:8529`
-
-## Import folder
-
-The default local import folder is:
-
-- `./arango-import`
-
-It is mounted:
-
-- into the Minikube node at `/mnt/arango-import`
-- into the ArangoDB container at `/imports`
-
-Put your local import files in `./arango-import`.
-
-Example:
-
-```bash
-./manage-arango.sh shell
-arangoimport --file /imports/nodes.jsonl --type jsonl --collection vertices
-arangoimport --file /imports/edges.jsonl --type jsonl --collection edges
-```
-
-## About the Minikube mount
-
-`minikube mount` is a foreground process. If you run it in a terminal and stop the terminal, the mount stops too.
-
-This repo handles that by running the mount in the background and tracking its PID:
-
-```bash
-./manage-arango.sh mount
-./manage-arango.sh umount
-```
-
-There are `minikube start --mount` / `--mount-string` flags, but they are not the most dependable option for this workflow, so this setup does not rely on them.
-
-## Useful commands
-
-```bash
-./manage-arango.sh start
-./manage-arango.sh mount
-./manage-arango.sh create-secrets
-./manage-arango.sh install-operator
-./manage-arango.sh deploy
-./manage-arango.sh ui-bg
-./manage-arango.sh ui-stop
-./manage-arango.sh status
-./manage-arango.sh ui
-./manage-arango.sh undeploy
 ./manage-arango.sh all-down
 ```
 
-## Kubernetes inspection
+- UI: `https://127.0.0.1:8529` (same server also serves `/_api/...` on that port)
+- Second local port for tooling: `https://127.0.0.1:18529` (optional; same process as UI)
 
-After deployment:
+## Sample graph import
+
+Bundled files: `arango-import/nodes.jsonl` and `edges.jsonl` → collections `nodes`, `edges`. 
 
 ```bash
-kubectl get arangodeployment
-kubectl describe arangodeployment single-server
-kubectl get all
-kubectl get pvc
-kubectl get svc
-kubectl get secret
+./manage-arango.sh all-up --load-sample-data
+# or, if Arango is already running:
+./manage-arango.sh load-sample-data
 ```
 
-Only Arango-created resources:
+For manual `arangoimport` inside the pod, use `./manage-arango.sh shell` and paths under `/imports/`. If you hit **401** against localhost in the pod, use `load-sample-data` instead (host `curl -k` via a short port-forward).
+
+## Host folders
+
+| On your machine | Role |
+|-----------------|------|
+| `./arango-import` | Files visible in the pod as `/imports` (via `minikube mount` → `/mnt/arango-import`) |
+| `./arango-data` | Database files (PVC backed by `ArangoLocalStorage` + second mount → `/mnt/arango-data`) |
+
+`all-up` starts both mounts in the background. Stopping the mounts or Minikube does not delete `./arango-data` on disk; deleting PVCs or `minikube delete` is a different story (see `./manage-arango.sh help` and Kubernetes docs).
+
+## Secrets
+
+On first deploy the script can create **`single-server-jwt`** and **`arango-root-pwd`**. A generated root password may be saved under **`.state/arango-root-password.txt`**. To set your own values first, use **`./manage-arango.sh create-secrets`** or create the secrets with `kubectl` (see script usage).
+
+## kubectl (optional)
 
 ```bash
-kubectl get all -l arango_deployment=single-server
-kubectl get pvc -l arango_deployment=single-server
-kubectl get svc -l arango_deployment=single-server
-kubectl get arangodeployments
+kubectl get arangodeployment,pods,svc,pvc -l arango_deployment=single-server
 kubectl get arangolocalstorages
 ```
 
-## Secrets
-<!-- Note: You may see historical warning events like:
-    Reconciliation Failed ... Secret for JWT token is missing single-server-jwt
-That is normal. kubectl describe shows the event history, including earlier failures. Those do not mean the deployment is still broken. -->
+## If `all-up` waits forever on Arango
 
-The deployment explicitly references:
+Run `kubectl describe arangodeployment single-server` and check **PVC** / **pod events**. Common causes: import or data **`minikube mount`** not running, or a **Pending** PVC (storage class / `ArangoLocalStorage`).
 
-- JWT secret: `single-server-jwt`
-- root password secret: `arango-root-pwd`
-
-Create them ahead of time if you want to control the values yourself:
+## More
 
 ```bash
-kubectl create secret generic single-server-jwt \
-  --from-literal=token='replace-with-a-long-random-secret'
-
-kubectl create secret generic arango-root-pwd \
-  --from-literal=username=root \
-  --from-literal=password='replace-with-a-strong-password'
+./manage-arango.sh help
 ```
 
-Or let the script create them once if missing:
-
-```bash
-./manage-arango.sh create-secrets
-```
+Lists every command (`mount`, `data-mount`, `deploy --load-sample-data`, `ui-bg`, etc.) and environment variables.

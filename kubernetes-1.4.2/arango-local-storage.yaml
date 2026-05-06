@@ -1,0 +1,12 @@
+# Binds ArangoDB PVC data to a path on the Minikube node. Pair with:
+#   minikube mount <host>/arango-data:/mnt/arango-data
+# See manage-arango.sh (data-mount / all-up).
+apiVersion: storage.arangodb.com/v1alpha
+kind: ArangoLocalStorage
+metadata:
+  name: arango-minikube-local-data
+spec:
+  storageClass:
+    name: arango-minikube-data
+  localPath:
+    - /mnt/arango-data

@@ -1,0 +1,6 @@
+{"_key":"p_alice","kind":"person","name":"Alice","city":"NYC"}
+{"_key":"p_bob","kind":"person","name":"Bob","city":"LA"}
+{"_key":"p_carol","kind":"person","name":"Carol","city":"NYC"}
+{"_key":"p_dan","kind":"person","name":"Dan","city":"Chicago"}
+{"_key":"org_acme","kind":"organization","name":"Acme Corp","founded":1998}
+{"_key":"proj_bridge","kind":"project","name":"Bridge Refactor","status":"active"}
