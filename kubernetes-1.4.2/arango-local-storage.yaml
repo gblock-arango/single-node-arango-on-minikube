@@ -1,6 +1,5 @@
-# Binds ArangoDB PVC data to a path on the Minikube node. Pair with:
-#   minikube mount <host>/arango-data:/mnt/arango-data
-# See manage-arango.sh (data-mount / all-up).
+# Binds ArangoDB PVC data to a path on the Minikube node's *native* filesystem (inside the VM).
+# RocksDB requires directory fsync, which 9p does not support, so cannot mount data to host
 apiVersion: storage.arangodb.com/v1alpha
 kind: ArangoLocalStorage
 metadata:
@@ -9,4 +8,4 @@ spec:
   storageClass:
     name: arango-minikube-data
   localPath:
-    - /mnt/arango-data
+    - /var/lib/arango-local-data

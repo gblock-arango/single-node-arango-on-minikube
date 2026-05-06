@@ -17,7 +17,7 @@ Stand up the Arango Cluster
 ./manage-arango.sh status
 ```
 
-First start after a Minikube restart can take **several minutes**: the **`single-server-sngl-…`** pod stays in **`Init:*`** while TLS prep runs and the image may be pulled. (You may also see a **`single-server-id-…`** pod; that is image discovery, not the database.) `all-up` waits only on **`role=single`** and prints pod status every 20s.
+First start after a Minikube restart can take **several minutes**: the **`single-server-sngl-…`** pod stays in **`Init:*`** while TLS prep runs and the image may be pulled. (You may also see a **`single-server-id-…`** pod; that is image discovery, not the database.) `all-up` waits only on **`role=single`** and prints pod status periodically.
 
 Bring down the Arango Cluster
 
@@ -25,8 +25,12 @@ Bring down the Arango Cluster
 ./manage-arango.sh all-down
 ```
 
-- UI: `https://127.0.0.1:8529` (same server also serves `/_api/...` on that port)
-- Second local port for tooling: `https://127.0.0.1:18529` (optional; same process as UI)
+Access the cluster here:
+
+- UI: `https://127.0.0.1:8529`
+- API: `https://127.0.0.1:18529` 
+
+with username = root and password = "replace-with-a-strong-password" (or value set by user following Secrets section below).
 
 ## Sample graph import
 
@@ -42,16 +46,17 @@ For manual `arangoimport` inside the pod, use `./manage-arango.sh shell` and pat
 
 ## Host folders
 
-| On your machine | Role |
-|-----------------|------|
-| `./arango-import` | Files visible in the pod as `/imports` (via `minikube mount` → `/mnt/arango-import`) |
-| `./arango-data` | Database files (PVC backed by `ArangoLocalStorage` + second mount → `/mnt/arango-data`) |
+`./arango-import` mounts on the host so that files are visible in the pod as `/imports` (via `minikube mount` → `/mnt/arango-import`)
 
-`all-up` starts both mounts in the background. Stopping the mounts or Minikube does not delete `./arango-data` on disk; deleting PVCs or `minikube delete` is a different story (see `./manage-arango.sh help` and Kubernetes docs).
+Note: no database data is mounted on the host. Database PVC data lives on the **Minikube VM** under **`ArangoLocalStorage` `spec.localPath`** (repo default **`/var/lib/arango-local-data`**). RocksDB needs working `fsync`; do not point Arango data at a `minikube mount` / 9p path.
+
+`./manage-arango.sh status` shows **Cluster localPath** from the live CR; that path is what Arango actually uses. If you still see **`/mnt/arango-data`** after editing `kubernetes-1.4.2/arango-local-storage.yaml`, the CR was probably created with the old value: remove the deployment, PVCs/PVs, and the `ArangoLocalStorage`, then re-apply the manifest (or run `minikube delete` for a clean slate).
+
+`all-up` starts only the import-folder mount in the background. To reset data on the VM, use the directory from `status` or `kubectl get arangolocalstorage arango-minikube-local-data -o jsonpath='{.spec.localPath[0]}{"\n"}'` (for example `minikube ssh -- sudo rm -rf /var/lib/arango-local-data/*` when that is your localPath). `minikube delete` removes the VM and all data.
 
 ## Secrets
 
-On first deploy the script can create **`single-server-jwt`** and **`arango-root-pwd`**. A generated root password may be saved under **`.state/arango-root-password.txt`**. To set your own values first, use **`./manage-arango.sh create-secrets`** or create the secrets with `kubectl` (see script usage).
+On deploy / `create-secrets`, the script ensures **`single-server-jwt`** and **`arango-root-pwd`** exist. It always copies the root password from **`arango-root-pwd`** into **`.state/arango-root-password.txt`** (mode `600`) so the Web UI can use **`root`** with that password. To set your own password first, create the secret with `kubectl` (see script usage), then run **`./manage-arango.sh create-secrets`** or **`./manage-arango.sh deploy`** to refresh the file.
 
 ## kubectl (optional)
 
@@ -62,7 +67,7 @@ kubectl get arangolocalstorages
 
 ## If `all-up` waits forever on Arango
 
-Run `kubectl describe arangodeployment single-server` and check **PVC** / **pod events**. Common causes: import or data **`minikube mount`** not running, or a **Pending** PVC (storage class / `ArangoLocalStorage`).
+Run `kubectl describe arangodeployment single-server` and check **PVC** / **pod events**. Common causes: import **`minikube mount`** not running, a **Pending** PVC (storage class / `ArangoLocalStorage`), or database files on a **9p** path (RocksDB needs native disk under **`/var/lib/arango-local-data`** in the VM by default).
 
 ## More
 
@@ -70,4 +75,4 @@ Run `kubectl describe arangodeployment single-server` and check **PVC** / **pod 
 ./manage-arango.sh help
 ```
 
-Lists every command (`mount`, `data-mount`, `deploy --load-sample-data`, `ui-bg`, etc.) and environment variables.
+Lists every command (`mount`, `deploy --load-sample-data`, `ui-bg`, etc.) and environment variables.
