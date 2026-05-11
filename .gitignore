@@ -1,1 +1,3 @@
 .state/openai-api-key
+# Local CDP package from Arango (do not commit)
+platform.yaml

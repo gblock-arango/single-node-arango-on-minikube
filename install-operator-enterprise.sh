@@ -5,18 +5,18 @@
 # Docs: https://docs.arango.ai/contextual-data-platform/install-and-upgrade/online-setup/
 #
 # Before running: remove the community operator Deployments from raw YAML (if any), e.g.
-#   kubectl delete deployment arango-deployment-operator arango-storage-operator --ignore-not-found
+#   kubectl delete deployment arango-deployment-operator arango-storage-operator -n arango --ignore-not-found
 #
 # Usage:
 #   ./install-operator-enterprise.sh
-#   ARANGO_HELM_RELEASE=myrel KUBE_NAMESPACE=default ./install-operator-enterprise.sh
+#   ARANGO_HELM_RELEASE=myrel KUBE_NAMESPACE=myns ./install-operator-enterprise.sh
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERSION="${ARANGO_OPERATOR_VERSION:-1.4.2}"
 RELEASE="${ARANGO_HELM_RELEASE:-operator}"
-NS="${KUBE_NAMESPACE:-default}"
+NS="${KUBE_NAMESPACE:-arango}"
 CHART_URL="https://github.com/arangodb/kube-arangodb/releases/download/${VERSION}/kube-arangodb-enterprise-${VERSION}.tgz"
 
 require_cmd() {

@@ -1,0 +1,40 @@
+# Creates bucket @MINIO_BUCKET@ after MinIO Deployment is Available (apply separately).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-create-bucket
+  namespace: "@MINIO_NS@"
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          env:
+            - name: MINIO_ENDPOINT
+              value: "@MINIO_ENDPOINT@"
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root
+                  key: MINIO_ROOT_USER
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-root
+                  key: MINIO_ROOT_PASSWORD
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              for i in $(seq 1 60); do
+                if mc alias set local "$MINIO_ENDPOINT" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY" 2>/dev/null; then
+                  break
+                fi
+                echo "waiting for MinIO ($i/60)..."
+                sleep 2
+              done
+              mc mb "local/@MINIO_BUCKET@" || true
