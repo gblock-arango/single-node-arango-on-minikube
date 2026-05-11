@@ -10,7 +10,7 @@ Install the basic dependencies:
 ./install_kubectl+helm+minikube  
 ```
 
-Stand up the Arango Cluster
+Stand up the cluster — same behavior as before (**`ARANGO_OPERATOR_FLAVOR` defaults to community**). If you export **`OPENAI_API_KEY`** before running deploy/`all-up`, the script saves it to **`.state/openai-api-key`** (mode `600`, gitignored), similar to the root password file for local apps.
 
 ```bash
 ./manage-arango.sh all-up
@@ -56,7 +56,7 @@ Note: no database data is mounted on the host. Database PVC data lives on the **
 
 ## Secrets
 
-On deploy / `create-secrets`, the script ensures **`single-server-jwt`** and **`arango-root-pwd`** exist. It always copies the root password from **`arango-root-pwd`** into **`.state/arango-root-password.txt`** (mode `600`) so the Web UI can use **`root`** with that password. To set your own password first, create the secret with `kubectl` (see script usage), then run **`./manage-arango.sh create-secrets`** or **`./manage-arango.sh deploy`** to refresh the file.
+On deploy / `create-secrets`, the script ensures **`single-server-jwt`** and **`arango-root-pwd`** exist. It always copies the root password from **`arango-root-pwd`** into **`.state/arango-root-password.txt`** (mode `600`) so the Web UI can use **`root`** with that password. If **`OPENAI_API_KEY`** is set when you run **`deploy`** or **`all-up`**, it is copied to **`.state/openai-api-key`** for tools on your machine (nothing is pushed into ArangoDB automatically). To set your own DB password first, create the secret with `kubectl` (see script usage), then run **`./manage-arango.sh create-secrets`** or **`./manage-arango.sh deploy`** to refresh the password file.
 
 ## kubectl (optional)
 
@@ -68,6 +68,10 @@ kubectl get arangolocalstorages
 ## If `all-up` waits forever on Arango
 
 Run `kubectl describe arangodeployment single-server` and check **PVC** / **pod events**. Common causes: import **`minikube mount`** not running, a **Pending** PVC (storage class / `ArangoLocalStorage`), or database files on a **9p** path (RocksDB needs native disk under **`/var/lib/arango-local-data`** in the VM by default).
+
+## Enterprise / Contextual Data Platform (advanced)
+
+Optional: **`kubernetes-1.4.2/single-server-enterprise-ai.yaml`**, **`install-operator-enterprise.sh`**, **`ARANGO_OPERATOR_FLAVOR=enterprise`**, plus license credentials and Arango’s [installation guide](https://docs.arango.ai/contextual-data-platform/install-and-upgrade/online-setup/). Not required for default **`./manage-arango.sh all-up`**.
 
 ## More
 

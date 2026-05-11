@@ -53,6 +53,8 @@ ARANGO_PORT_FORWARD_SVC="${ARANGO_PORT_FORWARD_SVC:-${ARANGO_DEPLOYMENT_NAME}-ea
 ARANGO_JWT_SECRET_NAME="${ARANGO_JWT_SECRET_NAME:-single-server-jwt}"
 ARANGO_ROOT_PASSWORD_SECRET_NAME="${ARANGO_ROOT_PASSWORD_SECRET_NAME:-arango-root-pwd}"
 ARANGO_ROOT_PASSWORD_FILE="${STATE_DIR}/arango-root-password.txt"
+# Written when OPENAI_API_KEY is set in the environment (same pattern as the root password file).
+OPENAI_API_KEY_FILE="${OPENAI_API_KEY_FILE:-${STATE_DIR}/openai-api-key}"
 # If 1/true/yes/on, after deploy imports bundled JSONL via HTTPS REST (curl -k + short port-forward).
 ARANGO_LOAD_SAMPLE_DATA="${ARANGO_LOAD_SAMPLE_DATA:-}"
 ARANGO_SAMPLE_IMPORT_PF_PORT="${ARANGO_SAMPLE_IMPORT_PF_PORT:-18629}"
@@ -61,8 +63,11 @@ BUNDLE_DIR="${BUNDLE_DIR:-${SCRIPT_DIR}/kubernetes-${ARANGO_OPERATOR_VERSION}}"
 CRD_FILE="${BUNDLE_DIR}/arango-crd.yaml"
 OPERATOR_FILE="${BUNDLE_DIR}/arango-deployment.yaml"
 STORAGE_FILE="${BUNDLE_DIR}/arango-storage.yaml"
-DEPLOYMENT_FILE="${BUNDLE_DIR}/single-server.yaml"
+DEPLOYMENT_FILE="${ARANGO_DEPLOYMENT_FILE:-${BUNDLE_DIR}/single-server.yaml}"
 LOCAL_STORAGE_FILE="${BUNDLE_DIR}/arango-local-storage.yaml"
+# community = raw YAML operators (default). enterprise = kube-arangodb-enterprise Helm chart (webhooks + gateway).
+ARANGO_OPERATOR_FLAVOR="${ARANGO_OPERATOR_FLAVOR:-community}"
+ARANGO_HELM_RELEASE="${ARANGO_HELM_RELEASE:-operator}"
 
 mkdir -p "${STATE_DIR}"
 
@@ -81,7 +86,7 @@ Commands:
   api-bg          Start a second localhost port-forward (same cluster service; for API tooling)
   api-stop        Stop the backgrounded API port-forward
   create-secrets  Create JWT and root password secrets if missing
-  install-operator Install ArangoDB operator CRDs/controllers
+  install-operator Install kube-arangodb operator(s); use Helm enterprise chart only when ARANGO_OPERATOR_FLAVOR=enterprise
   deploy          Apply ${DEPLOYMENT_FILE##*/} (optional: --load-sample-data)
   undeploy        Delete the ArangoDB deployment
   status          Show Minikube, mount, pod, and service status
@@ -92,6 +97,8 @@ Commands:
   load-sample-data Import bundled JSONL (nodes + edges) via HTTPS REST; needs running ArangoDB
   all-up          Start Minikube, import mount, install operator, and deploy (optional: --load-sample-data)
   all-down        Remove deployment, stop mount, and stop Minikube
+
+Further commands (enterprise / Contextual Data Platform only): create-license-secret, install-operator-enterprise
 
 Environment overrides:
   MINIKUBE_PROFILE
@@ -117,6 +124,9 @@ Environment overrides:
   ARANGO_LOAD_SAMPLE_DATA   If 1/true/yes/on, deploy/all-up imports bundled sample JSONL (REST via port-forward)
   ARANGO_SAMPLE_IMPORT_PF_PORT  Local port for that import (default 18629; avoid 8529 / ARANGO_API_LOCAL_PORT)
   ARANGO_POD_READY_TIMEOUT_SECONDS  Max seconds to wait for Arango pod Ready (default 600)
+  OPENAI_API_KEY  If set, copied to \${OPENAI_API_KEY_FILE} (default \${STATE_DIR}/openai-api-key, mode 600) during deploy/all-up for local tools
+  ARANGO_DEPLOYMENT_FILE  Override path to ArangoDeployment YAML (default: single-server.yaml)
+  ARANGO_OPERATOR_FLAVOR  community (default) or enterprise — enterprise needs Helm, license secret, and separate docs
 
 Sample files: nodes.jsonl and edges.jsonl under ARANGO_IMPORT_SOURCE (default ./arango-import) → collections nodes, edges.
 EOF
@@ -188,13 +198,28 @@ wait_for_cluster_ready() {
   log_step "Kubernetes control plane is ready"
 }
 
+enterprise_operator_deployment() {
+  printf 'arango-%s-operator' "${ARANGO_HELM_RELEASE}"
+}
+
 wait_for_operator_ready() {
   ensure_prereqs
   log_step "Waiting for Arango operator deployments to become available"
-  kubectl wait --for=condition=Available deployment/arango-deployment-operator --timeout=180s
-  kubectl wait --for=condition=Available deployment/arango-storage-operator --timeout=180s
-  log_step "Waiting for Arango operator pods to become Ready"
-  kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=kube-arangodb --timeout=180s || true
+  case "${ARANGO_OPERATOR_FLAVOR}" in
+    enterprise)
+      kubectl wait --for=condition=Available "deployment/$(enterprise_operator_deployment)" --timeout=300s
+      log_step "Waiting for enterprise operator pod to become Ready"
+      kubectl wait --for=condition=Ready pod \
+        -l "app.kubernetes.io/name=kube-arangodb-enterprise,app.kubernetes.io/instance=${ARANGO_HELM_RELEASE}" \
+        --timeout=300s || true
+      ;;
+    *)
+      kubectl wait --for=condition=Available deployment/arango-deployment-operator --timeout=180s
+      kubectl wait --for=condition=Available deployment/arango-storage-operator --timeout=180s
+      log_step "Waiting for Arango operator pods to become Ready"
+      kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=kube-arangodb --timeout=180s || true
+      ;;
+  esac
   log_step "Arango operators are ready"
 }
 
@@ -687,10 +712,51 @@ stop_api_background() {
 install_operator() {
   ensure_prereqs
   ensure_bundle_files
+  if [[ "${ARANGO_OPERATOR_FLAVOR}" == "enterprise" ]]; then
+    require_cmd helm
+    log_step "Applying ArangoDB CRDs (idempotent pre-step for enterprise operator)"
+    kubectl apply -f "${CRD_FILE}"
+    install_operator_enterprise
+    return
+  fi
   log_step "Applying ArangoDB CRDs and operator manifests (idempotent)"
   kubectl apply -f "${CRD_FILE}"
   kubectl apply -f "${OPERATOR_FILE}"
   kubectl apply -f "${STORAGE_FILE}"
+}
+
+install_operator_enterprise() {
+  ensure_prereqs
+  require_cmd helm
+  local chart_ver chart_url
+  chart_ver="${ARANGO_OPERATOR_VERSION}"
+  chart_url="https://github.com/arangodb/kube-arangodb/releases/download/${chart_ver}/kube-arangodb-enterprise-${chart_ver}.tgz"
+  log_step "Installing enterprise kube-arangodb via Helm (webhooks + gateway + storage operator)"
+  log_step "If you previously applied community operators from YAML, delete them first:"
+  log_step "  kubectl delete deployment arango-deployment-operator arango-storage-operator --ignore-not-found"
+  kubectl get namespace default >/dev/null 2>&1 || kubectl create namespace default
+  helm upgrade --install "${ARANGO_HELM_RELEASE}" "${chart_url}" \
+    --namespace default \
+    --set "webhooks.enabled=true" \
+    --set "operator.features.storage=true" \
+    --set "operator.args[0]=--deployment.feature.gateway=true" \
+    --set "operator.architectures={amd64}"
+}
+
+create_license_secret() {
+  ensure_prereqs
+  local id sec
+  id="${ARANGO_LICENSE_CLIENT_ID:-}"
+  sec="${ARANGO_LICENSE_CLIENT_SECRET:-}"
+  if [[ -z "${id}" || -z "${sec}" ]]; then
+    echo "Set ARANGO_LICENSE_CLIENT_ID and ARANGO_LICENSE_CLIENT_SECRET (from Arango license credentials), then re-run." >&2
+    exit 1
+  fi
+  kubectl create secret generic arango-license-key \
+    --from-literal=license-client-id="${id}" \
+    --from-literal=license-client-secret="${sec}" \
+    --dry-run=client -o yaml | kubectl apply -f -
+  log_step "Secret arango-license-key applied (license client id + secret)"
 }
 
 # Writes .state/arango-root-password.txt from the live secret so the UI password is always on disk after deploy/setup.
@@ -764,6 +830,17 @@ deploy_arango() {
   if truthy "${ARANGO_LOAD_SAMPLE_DATA:-}"; then
     load_sample_data
   fi
+
+  sync_openai_api_key_from_env
+}
+
+sync_openai_api_key_from_env() {
+  [[ -n "${OPENAI_API_KEY:-}" ]] || return 0
+  mkdir -p "${STATE_DIR}"
+  umask 077
+  printf '%s\n' "${OPENAI_API_KEY}" > "${OPENAI_API_KEY_FILE}"
+  chmod 600 "${OPENAI_API_KEY_FILE}" 2>/dev/null || true
+  log_step "OPENAI_API_KEY saved to ${OPENAI_API_KEY_FILE} (for apps on this host)"
 }
 
 undeploy_arango() {
@@ -808,6 +885,13 @@ show_status() {
   echo
   echo "== Secrets =="
   kubectl get secret "${ARANGO_JWT_SECRET_NAME}" "${ARANGO_ROOT_PASSWORD_SECRET_NAME}" || true
+  echo
+  echo "== Local API keys (host files; not sent to Minikube) =="
+  if [[ -f "${OPENAI_API_KEY_FILE}" ]]; then
+    echo "OPENAI_API_KEY file: ${OPENAI_API_KEY_FILE} (refreshed when OPENAI_API_KEY is set during deploy/all-up)"
+  else
+    echo "OPENAI_API_KEY file: none yet — export OPENAI_API_KEY before ./manage-arango.sh deploy or all-up to create ${OPENAI_API_KEY_FILE}"
+  fi
   echo
   echo "== UI =="
   if ui_running; then
@@ -1004,7 +1088,9 @@ case "${1:-}" in
   api-bg) start_api_background ;;
   api-stop) stop_api_background ;;
   create-secrets) ensure_secrets ;;
+  create-license-secret) create_license_secret ;;
   install-operator) install_operator ;;
+  install-operator-enterprise) install_operator_enterprise ;;
   deploy)
     case "${2:-}" in
       "") ;;

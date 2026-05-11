@@ -1,0 +1,53 @@
+# Enterprise-only ArangoDeployment (Contextual Data Platform). Requires Enterprise image + license,
+# kube-arangodb-enterprise Helm (webhooks/gateway), and Arango’s platform install flow — see README “Enterprise”.
+# OPENAI keys: platform Secrets Manager / ACP API — not this file.
+#
+apiVersion: "database.arangodb.com/v1"
+kind: "ArangoDeployment"
+metadata:
+  name: "single-server"
+spec:
+  mode: Single
+  image: arangodb/enterprise:3.12.9
+
+  license:
+    secretName: arango-license-key
+
+  gateway:
+    enabled: true
+    dynamic: true
+
+  gateways:
+    count: 1
+
+  auth:
+    jwtSecretName: single-server-jwt
+
+  bootstrap:
+    passwordSecretNames:
+      root: arango-root-pwd
+
+  single:
+    args:
+      - --vector-index
+    securityContext:
+      fsGroup: 1000
+
+    volumeClaimTemplate:
+      spec:
+        storageClassName: arango-minikube-data
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 20Gi
+
+    volumes:
+      - name: import-dir
+        hostPath:
+          path: /mnt/arango-import
+          type: DirectoryOrCreate
+
+    volumeMounts:
+      - name: import-dir
+        mountPath: /imports
